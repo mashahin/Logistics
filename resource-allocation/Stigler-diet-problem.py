@@ -7,6 +7,8 @@ import pprint
 from collections import Counter
 from IPython.display import Image
 from IPython.core.display import HTML 
+from six.moves import xrange
+from ortools.linear_solver import pywraplp
 
 pd.options.display.max_rows = 999
 pd.options.display.width = 300
@@ -106,4 +108,61 @@ df = pd.DataFrame(data,columns = ["Commodity", "Unit", "1939 price (cents)", "Ca
                 "Iron (mg)", "Vitamin A (IU)", "Thiamine (mg)", "Riboflavin (mg)", "Niacin (mg)", "Ascorbic Acid (mg)"]).set_index("Commodity")
 
 print(df.head())
+
+
+# Instantiate a Glop solver, naming it LinearExample.
+solver = pywraplp.Solver('StiglerDietExample',
+                         pywraplp.Solver.GLOP_LINEAR_PROGRAMMING)
+
+# Declare an array to hold our variables.
+# Must be non-negative variables..
+foods = [solver.NumVar(0.0, solver.infinity(), item[0]) for item in data]
+
+# Objective function: Minimize the sum of (price-normalized) foods.
+objective = solver.Objective()
+# Here the Objective function looks something like food1 * 1 + food2 * 1 .. 
+for food in foods:
+    objective.SetCoefficient(food, 1)
+# Minimization Problem
+objective.SetMinimization()
+
+# Create the constraints, one per nutrient.
+constraints = []
+for i, nutrient in enumerate(nutrients):
+    # X * Nutrient >= 0
+    constraints.append(solver.Constraint(nutrient[1], solver.infinity()))
+    for j, item in enumerate(data):
+        # Define all the Nutrients and Weights
+        constraints[i].SetCoefficient(foods[j], item[i + 3])
+
+print('Number of variables =', solver.NumVariables())
+print('Number of constraints =', solver.NumConstraints())
+
+
+# Solve the system.
+status = solver.Solve()
+# Check that the problem has an optimal solution.
+if status != pywraplp.Solver.OPTIMAL:
+    print("The problem does not have an optimal solution!")
+    exit(1)
+
+nutrients_result = [0] * len(nutrients)
+print('')
+print('Annual Foods:')
+for i, food in enumerate(foods):
+    if food.solution_value() > 0.0:
+        print('{}: ${}'.format(data[i][0], 365. * food.solution_value()))
+    for j, nutrient in enumerate(nutrients):
+        nutrients_result[j] += data[i][j + 3] * food.solution_value()
+print('')
+print('Optimal annual price: ${:.4f}'.format(365. * objective.Value()))
+print('')
+print('Nutrients per day:')
+for i, nutrient in enumerate(nutrients):
+    print('{}: {:.2f} (min {})'.format(nutrient[0], nutrients_result[i],
+                                       nutrient[1]))
+print('')
+print('Advanced usage:')
+print('Problem solved in ', solver.wall_time(), ' milliseconds')
+print('Problem solved in ', solver.iterations(), ' iterations')
 
